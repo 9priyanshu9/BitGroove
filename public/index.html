@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#101018">
+    <title>BitGroove - Music Player</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- App Container -->
+    <div id="app" class="app">
+        <!-- Dynamic Background that changes with album art -->
+        <div id="dynamic-bg" class="dynamic-bg"></div>
+        
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <i class="fas fa-compact-disc logo-icon"></i>
+                    <span class="logo-text">BitGroove</span>
+                </div>
+                <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle Sidebar" aria-label="Toggle sidebar">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <h3 class="nav-section-title">Discover</h3>
+                    <button class="nav-item active" data-page="home">
+                        <i class="fas fa-home"></i>
+                        <span>Home</span>
+                    </button>
+                    <button class="nav-item" data-page="search">
+                        <i class="fas fa-search"></i>
+                        <span>Search</span>
+                    </button>
+                    <button class="nav-item" data-page="trending">
+                        <i class="fas fa-fire"></i>
+                        <span>Trending</span>
+                    </button>
+                    <button class="nav-item" data-page="charts">
+                        <i class="fas fa-chart-line"></i>
+                        <span>Charts</span>
+                    </button>
+                </div>
+
+                <div class="nav-section">
+                    <h3 class="nav-section-title">Library</h3>
+                    <button class="nav-item" data-page="favorites">
+                        <i class="fas fa-heart"></i>
+                        <span>Favorites</span>
+                    </button>
+                    <button class="nav-item" data-page="playlists">
+                        <i class="fas fa-list-ul"></i>
+                        <span>Playlists</span>
+                    </button>
+                    <button class="nav-item" data-page="recent">
+                        <i class="fas fa-clock"></i>
+                        <span>Recently Played</span>
+                    </button>
+                    <button class="nav-item" data-page="downloads">
+                        <i class="fas fa-download"></i>
+                        <span>Downloads</span>
+                    </button>
+                </div>
+
+                <div class="nav-section">
+                    <h3 class="nav-section-title">Your Playlists</h3>
+                    <div id="user-playlists-list" class="user-playlists-list">
+                        <!-- Dynamically populated -->
+                    </div>
+                    <button class="nav-item create-playlist-btn" id="create-playlist-btn">
+                        <i class="fas fa-plus"></i>
+                        <span>Create Playlist</span>
+                    </button>
+                </div>
+            </nav>
+
+            <!-- Equalizer Toggle in Sidebar -->
+            <div class="sidebar-footer">
+                <button class="nav-item" data-page="equalizer">
+                    <i class="fas fa-sliders-h"></i>
+                    <span>Equalizer</span>
+                </button>
+                <button class="nav-item" data-page="settings">
+                    <i class="fas fa-cog"></i>
+                    <span>Settings</span>
+                </button>
+                <button class="nav-item" data-page="connect">
+                    <i class="fab fa-instagram"></i>
+                    <span>Connect with Vivek</span>
+                </button>
+            </div>
+        </aside>
+        <button id="mobile-nav-backdrop" class="mobile-nav-backdrop" aria-label="Close navigation" tabindex="-1"></button>
+
+        <!-- Main Content Area -->
+        <main class="main-content" id="main-content">
+            <!-- Top Bar with Search -->
+            <header class="top-bar">
+                <div class="top-bar-left">
+                    <button class="nav-btn mobile-menu-btn" id="mobile-menu-btn" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
+                        <i class="fas fa-bars" aria-hidden="true"></i>
+                    </button>
+                    <button class="nav-btn" id="back-btn" title="Go Back" aria-label="Go back">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <button class="nav-btn" id="forward-btn" title="Go Forward" aria-label="Go forward">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+                <div class="search-container" id="search-container">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="search" id="search-input" class="search-input" aria-label="Search music" placeholder="Search songs, artists, albums..." autocomplete="off">
+                    <button class="search-clear" id="search-clear" aria-label="Clear search" style="display:none">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="top-bar-right">
+                    <button class="theme-toggle" id="theme-toggle" title="Toggle Theme" aria-label="Toggle theme">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Page Content Container -->
+            <div class="page-content" id="page-content">
+                <!-- Home Page (Default) -->
+                <div class="page active" id="page-home">
+                    <div class="page-header home-hero">
+                        <span class="eyebrow">YOUR DAILY SOUNDTRACK</span>
+                        <h1>Good Evening</h1>
+                        <p class="subtitle">Find your next favorite. Keep the music going.</p>
+                    </div>
+
+                    <section class="section" id="related-section" hidden>
+                        <div class="section-header">
+                            <h2 class="section-title">More like this</h2>
+                        </div>
+                        <p class="subtitle" id="related-description" aria-live="polite">Recommendations inspired by what you play</p>
+                        <div class="horizontal-scroll song-grid" id="related-songs"></div>
+                    </section>
+
+                    <!-- Quick Picks Grid -->
+                    <section class="section" id="quick-picks-section">
+                        <h2 class="section-title">Quick Picks</h2>
+                        <div class="quick-picks-grid" id="quick-picks">
+                            <!-- Dynamically populated -->
+                        </div>
+                    </section>
+
+                    <!-- Trending Now -->
+                    <section class="section" id="trending-section">
+                        <div class="section-header">
+                            <h2 class="section-title">Trending Now</h2>
+                            <button class="see-all-btn" data-discover="trending">See All</button>
+                        </div>
+                        <div class="horizontal-scroll" id="trending-songs">
+                            <!-- Dynamically populated -->
+                        </div>
+                    </section>
+
+                    <!-- New Releases -->
+                    <section class="section" id="new-releases-section">
+                        <div class="section-header">
+                            <h2 class="section-title">New Releases</h2>
+                            <button class="see-all-btn" data-discover="releases">See All</button>
+                        </div>
+                        <div class="horizontal-scroll" id="new-releases">
+                            <!-- Dynamically populated -->
+                        </div>
+                    </section>
+
+                    <!-- Top Charts -->
+                    <section class="section" id="top-charts-section">
+                        <div class="section-header">
+                            <h2 class="section-title">Top Charts</h2>
+                            <button class="see-all-btn" data-discover="charts">See All</button>
+                        </div>
+                        <div class="horizontal-scroll" id="top-charts">
+                            <!-- Dynamically populated -->
+                        </div>
+                    </section>
+
+                    <!-- Top Playlists -->
+                    <section class="section" id="top-playlists-section">
+                        <div class="section-header">
+                            <h2 class="section-title">Featured Playlists</h2>
+                            <button class="see-all-btn" data-discover="playlists">See All</button>
+                        </div>
+                        <div class="horizontal-scroll" id="top-playlists">
+                            <!-- Dynamically populated -->
+                        </div>
+                    </section>
+
+                    <!-- Top Artists -->
+                    <section class="section" id="top-artists-section">
+                        <div class="section-header">
+                            <h2 class="section-title">Top Artists</h2>
+                            <button class="see-all-btn" data-discover="artists">See All</button>
+                        </div>
+                        <div class="horizontal-scroll artists-scroll" id="top-artists">
+                            <!-- Dynamically populated -->
+                        </div>
+                    </section>
+                </div>
+
+                <!-- Search Results Page -->
+                <div class="page" id="page-search">
+                    <div class="search-filters" id="search-filters">
+                        <button class="filter-btn active" data-filter="songs">All Songs</button>
+                        <button class="filter-btn" data-filter="youtube"><i class="fab fa-youtube" style="color:#ff3b30;margin-right:4px;"></i>YouTube</button>
+                        <button class="filter-btn" data-filter="albums">Albums</button>
+                        <button class="filter-btn" data-filter="artists">Artists</button>
+                        <button class="filter-btn" data-filter="playlists">Playlists</button>
+                    </div>
+                    <div class="search-results" id="search-results">
+                        <div class="empty-state">
+                            <i class="fas fa-search"></i>
+                            <p>Search for your favorite songs, artists, or albums</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Trending Page -->
+                <div class="page" id="page-trending">
+                    <div class="page-header">
+                        <h1><i class="fas fa-fire"></i> Trending</h1>
+                    </div>
+                    <div class="song-list" id="trending-list">
+                        <!-- Dynamically populated -->
+                    </div>
+                </div>
+
+                <!-- Charts Page -->
+                <div class="page" id="page-charts">
+                    <div class="page-header">
+                        <h1><i class="fas fa-chart-line"></i> Charts</h1>
+                    </div>
+                    <div class="charts-grid" id="charts-grid">
+                        <!-- Dynamically populated -->
+                    </div>
+                </div>
+
+                <div class="page" id="page-discover">
+                    <div class="page-header"><h1 id="discover-title">Discover</h1></div>
+                    <div class="search-results-grid" id="discover-grid"></div>
+                </div>
+
+                <!-- Favorites Page -->
+                <div class="page" id="page-favorites">
+                    <div class="page-header">
+                        <h1><i class="fas fa-heart"></i> Favorites</h1>
+                    </div>
+                    <div class="song-list" id="favorites-list">
+                        <div class="empty-state">
+                            <i class="fas fa-heart"></i>
+                            <p>No favorites yet. Like songs to add them here.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Playlists Page -->
+                <div class="page" id="page-playlists">
+                    <div class="page-header">
+                        <h1><i class="fas fa-list-ul"></i> Your Playlists</h1>
+                    </div>
+                    <div class="playlists-grid" id="playlists-grid">
+                        <div class="empty-state">
+                            <i class="fas fa-list-ul"></i>
+                            <p>No playlists yet. Create one to get started!</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recently Played Page -->
+                <div class="page" id="page-recent">
+                    <div class="page-header">
+                        <h1><i class="fas fa-clock"></i> Recently Played</h1>
+                    </div>
+                    <div class="song-list" id="recent-list">
+                        <div class="empty-state">
+                            <i class="fas fa-clock"></i>
+                            <p>No listening history yet. Start playing some music!</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Downloads Page -->
+                <div class="page" id="page-downloads">
+                    <div class="page-header">
+                        <h1><i class="fas fa-download"></i> Downloads</h1>
+                    </div>
+                    <div class="song-list" id="downloads-list">
+                        <div class="empty-state">
+                            <i class="fas fa-download"></i>
+                            <p>No downloads yet. Download songs for offline listening.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Album Detail Page -->
+                <div class="page" id="page-album-detail">
+                    <div class="detail-header" id="album-detail-header">
+                        <!-- Dynamically populated -->
+                    </div>
+                    <div class="song-list" id="album-songs-list">
+                        <!-- Dynamically populated -->
+                    </div>
+                </div>
+
+                <!-- Artist Detail Page -->
+                <div class="page" id="page-artist-detail">
+                    <div class="artist-detail-header" id="artist-detail-header">
+                        <!-- Dynamically populated -->
+                    </div>
+                    <div id="artist-detail-content">
+                        <!-- Dynamically populated -->
+                    </div>
+                </div>
+
+                <!-- Playlist Detail Page -->
+                <div class="page" id="page-playlist-detail">
+                    <div class="detail-header" id="playlist-detail-header">
+                        <!-- Dynamically populated -->
+                    </div>
+                    <div class="song-list" id="playlist-songs-list">
+                        <!-- Dynamically populated -->
+                    </div>
+                </div>
+
+                <!-- Equalizer Page -->
+                <div class="page" id="page-equalizer">
+                    <div class="page-header">
+                        <h1><i class="fas fa-sliders-h"></i> Equalizer</h1>
+                    </div>
+                    <div class="equalizer-container" id="equalizer-container">
+                        <div class="eq-presets">
+                            <h3>Presets</h3>
+                            <div class="eq-preset-buttons" id="eq-preset-buttons">
+                                <button class="eq-preset active" data-preset="flat">Flat</button>
+                                <button class="eq-preset" data-preset="bass-boost">Bass Boost</button>
+                                <button class="eq-preset" data-preset="treble-boost">Treble Boost</button>
+                                <button class="eq-preset" data-preset="vocal">Vocal</button>
+                                <button class="eq-preset" data-preset="rock">Rock</button>
+                                <button class="eq-preset" data-preset="pop">Pop</button>
+                                <button class="eq-preset" data-preset="jazz">Jazz</button>
+                                <button class="eq-preset" data-preset="classical">Classical</button>
+                                <button class="eq-preset" data-preset="electronic">Electronic</button>
+                                <button class="eq-preset" data-preset="hip-hop">Hip-Hop</button>
+                            </div>
+                        </div>
+                        <div class="eq-sliders" id="eq-sliders">
+                            <!-- 10 band EQ sliders - populated by JS -->
+                        </div>
+                        <div class="eq-extras">
+                            <div class="eq-extra-control">
+                                <label>Bass Boost</label>
+                                <input type="range" id="bass-boost-slider" min="0" max="100" value="0" class="eq-range">
+                            </div>
+                            <div class="eq-extra-control">
+                                <label>Virtualizer</label>
+                                <input type="range" id="virtualizer-slider" min="0" max="100" value="0" class="eq-range">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Page -->
+                <div class="page" id="page-settings">
+                    <div class="page-header">
+                        <h1><i class="fas fa-cog"></i> Settings</h1>
+                    </div>
+                    <div class="settings-container">
+                        <div class="settings-group">
+                            <h3>Audio Quality</h3>
+                            <div class="setting-item">
+                                <label>Streaming Quality</label>
+                                <select id="streaming-quality" class="setting-select">
+                                    <option value="12kbps">Low (12kbps)</option>
+                                    <option value="48kbps">Medium (48kbps)</option>
+                                    <option value="96kbps">High (96kbps)</option>
+                                    <option value="160kbps" selected>Very High (160kbps)</option>
+                                    <option value="320kbps">Lossless (320kbps)</option>
+                                </select>
+                            </div>
+                            <div class="setting-item">
+                                <label>Download Quality</label>
+                                <select id="download-quality" class="setting-select">
+                                    <option value="96kbps">High (96kbps)</option>
+                                    <option value="160kbps">Very High (160kbps)</option>
+                                    <option value="320kbps" selected>Lossless (320kbps)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="settings-group">
+                            <h3>Playback</h3>
+                            <div class="setting-item">
+                                <label>Crossfade</label>
+                                <input type="range" id="crossfade-slider" min="0" max="12" value="0" class="setting-range">
+                                <span id="crossfade-value">Off</span>
+                            </div>
+                            <div class="setting-item">
+                                <label>Gapless Playback</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="gapless-toggle" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <label>AutoMix</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="automix-toggle">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="settings-group">
+                            <h3>Appearance</h3>
+                            <div class="setting-item">
+                                <label>Theme</label>
+                                <select id="theme-select" class="setting-select">
+                                    <option value="dark" selected>Dark</option>
+                                    <option value="light">Light</option>
+                                    <option value="auto">Auto</option>
+                                </select>
+                            </div>
+                            <div class="setting-item">
+                                <label>Accent Color</label>
+                                <div class="accent-colors" id="accent-colors">
+                                    <button class="accent-color active" data-color="#e91e63" style="background:#e91e63"></button>
+                                    <button class="accent-color" data-color="#ff5722" style="background:#ff5722"></button>
+                                    <button class="accent-color" data-color="#ff9800" style="background:#ff9800"></button>
+                                    <button class="accent-color" data-color="#4caf50" style="background:#4caf50"></button>
+                                    <button class="accent-color" data-color="#2196f3" style="background:#2196f3"></button>
+                                    <button class="accent-color" data-color="#9c27b0" style="background:#9c27b0"></button>
+                                    <button class="accent-color" data-color="#00bcd4" style="background:#00bcd4"></button>
+                                    <button class="accent-color" data-color="#f44336" style="background:#f44336"></button>
+                                </div>
+                            </div>
+                            <div class="setting-item">
+                                <label>Dynamic Background</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="dynamic-bg-toggle" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="settings-group">
+                            <h3>Content</h3>
+                            <div class="setting-item">
+                                <label>Language Preference</label>
+                                <select id="language-select" class="setting-select" multiple>
+                                    <option value="hindi" selected>Hindi</option>
+                                    <option value="english" selected>English</option>
+                                    <option value="punjabi">Punjabi</option>
+                                    <option value="tamil">Tamil</option>
+                                    <option value="telugu">Telugu</option>
+                                    <option value="marathi">Marathi</option>
+                                    <option value="gujarati">Gujarati</option>
+                                    <option value="bengali">Bengali</option>
+                                    <option value="kannada">Kannada</option>
+                                    <option value="malayalam">Malayalam</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="settings-group">
+                            <h3>Sleep Timer</h3>
+                            <div class="setting-item">
+                                <label>Timer</label>
+                                <select id="sleep-timer-select" class="setting-select">
+                                    <option value="0" selected>Off</option>
+                                    <option value="15">15 minutes</option>
+                                    <option value="30">30 minutes</option>
+                                    <option value="45">45 minutes</option>
+                                    <option value="60">1 hour</option>
+                                    <option value="90">1.5 hours</option>
+                                    <option value="120">2 hours</option>
+                                </select>
+                                <span id="sleep-timer-remaining" class="timer-badge" style="display:none"></span>
+                            </div>
+                        </div>
+                        <div class="settings-group">
+                            <h3>Data</h3>
+                            <div class="setting-item">
+                                <button class="danger-btn" id="clear-data-btn">Clear All Data</button>
+                            </div>
+                        </div>
+                        <div class="settings-group">
+                            <h3>About</h3>
+                            <div class="setting-item">
+                                <label>BitGroove v1.0.0</label>
+                                <span class="muted">Music for everyone, powered by open source</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Connect Page -->
+                <div class="page" id="page-connect">
+                    <div class="connect-page">
+                        <div class="connect-pattern" aria-hidden="true">
+                            <span class="pattern-orb orb-one"></span>
+                            <span class="pattern-orb orb-two"></span>
+                            <span class="pattern-ring ring-one"></span>
+                            <span class="pattern-ring ring-two"></span>
+                        </div>
+                        <div class="connect-card">
+                            <div class="connect-avatar-wrap"><div class="connect-avatar"><i class="fab fa-instagram"></i></div></div>
+                            <p class="connect-eyebrow">LET'S STAY CONNECTED</p>
+                            <h1>Follow Vivek</h1>
+                            <p class="connect-subtitle">Scan the QR or tap below to visit my Instagram.</p>
+                            <div class="qr-frame">
+                                <div class="qr-glow"></div>
+                                <img src="qr/_vivek__singh__rajput_qr.png" alt="Instagram QR code for @_vivek__singh__rajput">
+                            </div>
+                            <a class="instagram-link" href="https://www.instagram.com/_vivek__singh__rajput/" target="_blank" rel="noopener noreferrer">
+                                <i class="fab fa-instagram"></i>
+                                <span>@_vivek__singh__rajput</span>
+                                <i class="fas fa-arrow-up-right-from-square link-arrow"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Now Playing Bar (Bottom) -->
+        <div class="now-playing-bar" id="now-playing-bar">
+            <div class="np-left" id="np-left">
+                <div class="np-artwork-container">
+                    <img id="np-artwork" class="np-artwork" src="" alt="Album Art">
+                    <div class="np-artwork-placeholder">
+                        <i class="fas fa-music"></i>
+                    </div>
+                </div>
+                <div class="np-info">
+                    <div class="np-title" id="np-title">Not Playing</div>
+                    <div class="np-artist" id="np-artist">—</div>
+                </div>
+                <button class="np-like-btn" id="np-like-btn" title="Like" aria-label="Favorite current song">
+                    <i class="far fa-heart"></i>
+                </button>
+            </div>
+
+            <div class="np-center">
+                <div class="np-controls">
+                    <button class="np-btn" id="shuffle-btn" title="Shuffle" aria-label="Shuffle">
+                        <i class="fas fa-random"></i>
+                    </button>
+                    <button class="np-btn" id="prev-btn" title="Previous" aria-label="Previous track">
+                        <i class="fas fa-step-backward"></i>
+                    </button>
+                    <button class="np-btn np-play-btn" id="play-btn" title="Play" aria-label="Play">
+                        <i class="fas fa-play"></i>
+                    </button>
+                    <button class="np-btn" id="next-btn" title="Next" aria-label="Next track">
+                        <i class="fas fa-step-forward"></i>
+                    </button>
+                    <button class="np-btn" id="repeat-btn" title="Repeat" aria-label="Repeat">
+                        <i class="fas fa-redo"></i>
+                    </button>
+                </div>
+                <div class="np-progress">
+                    <span class="np-time" id="np-current-time">0:00</span>
+                    <div class="progress-bar-container" id="progress-bar-container">
+                        <div class="progress-bar" id="progress-bar">
+                            <div class="progress-bar-fill" id="progress-bar-fill"></div>
+                            <div class="progress-bar-handle" id="progress-bar-handle"></div>
+                        </div>
+                    </div>
+                    <span class="np-time" id="np-duration">0:00</span>
+                </div>
+            </div>
+
+            <div class="np-right">
+                <button class="np-btn" id="lyrics-btn" title="Lyrics" aria-label="Show lyrics">
+                    <i class="fas fa-align-left"></i>
+                </button>
+                <button class="np-btn" id="queue-btn" title="Queue" aria-label="Show queue">
+                    <i class="fas fa-list-ol"></i>
+                </button>
+                <div class="volume-container">
+                    <button class="np-btn" id="volume-btn" title="Volume" aria-label="Mute or unmute">
+                        <i class="fas fa-volume-up"></i>
+                    </button>
+                    <div class="volume-slider-container">
+                        <input type="range" id="volume-slider" class="volume-slider" min="0" max="100" value="80">
+                    </div>
+                </div>
+                <button class="np-btn" id="fullscreen-btn" title="Full Screen Player" aria-label="Open fullscreen player">
+                    <i class="fas fa-expand"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Full Screen Player Overlay -->
+        <div class="fullscreen-player" id="fullscreen-player">
+            <button class="fs-close" id="fs-close">
+                <i class="fas fa-chevron-down"></i>
+            </button>
+            <div class="fs-bg" id="fs-bg"></div>
+            <div class="fs-content">
+                <div class="fs-artwork-container">
+                    <img id="fs-artwork" class="fs-artwork" src="" alt="Album Art">
+                </div>
+                <div class="fs-info">
+                    <h2 id="fs-title" class="fs-title">Not Playing</h2>
+                    <p id="fs-artist" class="fs-artist">—</p>
+                    <p id="fs-album" class="fs-album">—</p>
+                </div>
+                <div class="fs-progress">
+                    <div class="progress-bar-container" id="fs-progress-container">
+                        <div class="progress-bar" id="fs-progress-bar">
+                            <div class="progress-bar-fill" id="fs-progress-fill"></div>
+                            <div class="progress-bar-handle" id="fs-progress-handle"></div>
+                        </div>
+                    </div>
+                    <div class="fs-times">
+                        <span id="fs-current-time">0:00</span>
+                        <span id="fs-duration">0:00</span>
+                    </div>
+                </div>
+                <div class="fs-controls">
+                    <button class="fs-btn" id="fs-shuffle" aria-label="Shuffle"><i class="fas fa-random"></i></button>
+                    <button class="fs-btn" id="fs-prev" aria-label="Previous track"><i class="fas fa-step-backward"></i></button>
+                    <button class="fs-btn fs-play-btn" id="fs-play" aria-label="Play"><i class="fas fa-play"></i></button>
+                    <button class="fs-btn" id="fs-next" aria-label="Next track"><i class="fas fa-step-forward"></i></button>
+                    <button class="fs-btn" id="fs-repeat" aria-label="Repeat"><i class="fas fa-redo"></i></button>
+                </div>
+                <div class="fs-actions">
+                    <button class="fs-action-btn" id="fs-like" aria-label="Favorite current song"><i class="far fa-heart"></i></button>
+                    <button class="fs-action-btn" id="fs-download-btn" aria-label="Download current song"><i class="fas fa-download"></i></button>
+                    <button class="fs-action-btn" id="fs-add-to-playlist" aria-label="Add current song to playlist"><i class="fas fa-plus"></i></button>
+                    <button class="fs-action-btn" id="fs-lyrics" aria-label="Show lyrics"><i class="fas fa-align-left"></i></button>
+                </div>
+                <!-- Lyrics Panel in Fullscreen -->
+                <div class="fs-lyrics-panel" id="fs-lyrics-panel" style="display:none">
+                    <div class="lyrics-content" id="fs-lyrics-content">
+                        <div class="empty-state">
+                            <i class="fas fa-align-left"></i>
+                            <p>No lyrics available</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Queue Panel (Slide-in) -->
+        <div class="queue-panel" id="queue-panel">
+            <div class="queue-header">
+                <h3>Up Next</h3>
+                <div class="queue-actions">
+                    <button class="queue-action-btn" id="clear-queue-btn" title="Clear Queue" aria-label="Clear queue">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                    <button class="queue-action-btn" id="close-queue-btn" title="Close" aria-label="Close queue">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <label class="autoplay-control" for="autoplay-toggle">
+                <span><strong>Autoplay</strong><small>Keep going with similar tracks</small></span>
+                <input type="checkbox" id="autoplay-toggle" checked>
+            </label>
+            <p id="autoplay-status" class="autoplay-status" aria-live="polite">Play a song to discover what comes next</p>
+            <div class="queue-now-playing" id="queue-now-playing">
+                <!-- Current song -->
+            </div>
+            <div class="queue-list" id="queue-list">
+                <!-- Queue items -->
+            </div>
+        </div>
+
+        <!-- Lyrics Panel (Slide-in) -->
+        <div class="lyrics-panel" id="lyrics-panel">
+            <div class="lyrics-header">
+                <h3>Lyrics</h3>
+                <button class="lyrics-close" id="close-lyrics-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="lyrics-content" id="lyrics-content">
+                <div class="empty-state">
+                    <i class="fas fa-align-left"></i>
+                    <p>No lyrics available</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Context Menu -->
+        <div class="context-menu" id="context-menu" style="display:none">
+            <button class="context-item" data-action="play"><i class="fas fa-play"></i> Play</button>
+            <button class="context-item" data-action="play-next"><i class="fas fa-step-forward"></i> Play Next</button>
+            <button class="context-item" data-action="add-queue"><i class="fas fa-list-ol"></i> Add to Queue</button>
+            <hr class="context-divider">
+            <button class="context-item" data-action="like"><i class="far fa-heart"></i> Like</button>
+            <button class="context-item" data-action="add-playlist"><i class="fas fa-plus"></i> Add to Playlist</button>
+            <button class="context-item" data-action="download"><i class="fas fa-download"></i> Download</button>
+            <hr class="context-divider">
+            <button class="context-item" data-action="artist"><i class="fas fa-user"></i> Go to Artist</button>
+            <button class="context-item" data-action="album"><i class="fas fa-compact-disc"></i> Go to Album</button>
+            <button class="context-item" data-action="share"><i class="fas fa-share"></i> Share</button>
+        </div>
+
+        <!-- Create Playlist Modal -->
+        <div class="modal-overlay" id="playlist-modal" style="display:none">
+            <div class="modal">
+                <h3>Create New Playlist</h3>
+                <input type="text" id="playlist-name-input" class="modal-input" placeholder="Playlist name">
+                <textarea id="playlist-desc-input" class="modal-textarea" placeholder="Description (optional)"></textarea>
+                <div class="modal-actions">
+                    <button class="modal-btn cancel" id="playlist-cancel">Cancel</button>
+                    <button class="modal-btn primary" id="playlist-create">Create</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add to Playlist Modal -->
+        <div class="modal-overlay" id="add-to-playlist-modal" style="display:none">
+            <div class="modal">
+                <h3>Add to Playlist</h3>
+                <div class="modal-playlist-list" id="modal-playlist-list">
+                    <!-- Dynamically populated -->
+                </div>
+                <div class="modal-actions">
+                    <button class="modal-btn cancel" id="add-playlist-cancel">Cancel</button>
+                    <button class="modal-btn primary" id="add-playlist-new">New Playlist</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notification -->
+        <div class="toast-container" id="toast-container"></div>
+
+        <!-- Loading Overlay -->
+        <div class="loading-overlay" id="loading-overlay" style="display:none">
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+                <p>Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- YouTube Background Player Anchor -->
+    <div id="yt-player-host" style="position:fixed;bottom:-9999px;left:-9999px;width:320px;height:240px;opacity:0.001;pointer-events:none;z-index:-9999;">
+        <div id="yt-player-target"></div>
+    </div>
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script src="app.js"></script>
+</body>
+</html>

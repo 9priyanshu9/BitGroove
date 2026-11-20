@@ -1,0 +1,15 @@
+{
+  "name": "bitgroove",
+  "version": "1.0.0",
+  "description": "BitGroove - A modern music player inspired by BitChord",
+  "main": "server.js",
+  "scripts": {
+    "start": "python server.py",
+    "dev": "python server.py",
+    "test": "node --test tests/player.test.js",
+    "test:backend": "python -m unittest discover -s tests -p test_backend.py"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
