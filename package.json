@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "BitGroove - A modern music player inspired by BitChord",
   "main": "server.js",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "start": "python server.py",
     "dev": "python server.py",

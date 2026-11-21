@@ -385,6 +385,37 @@ class MediaResponse(io.BytesIO):
 
 
 class HTTPTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
+    def test_vercel_entrypoint_restores_nested_routes_and_query_parameters(self):
+        script = r'''
+const assert = require('node:assert/strict');
+const http = require('node:http');
+const handler = require('./api/index');
+const server = http.createServer(handler);
+server.listen(0, '127.0.0.1', async () => {
+    try {
+        const base = `http://127.0.0.1:${server.address().port}`;
+        for (const [path, status, message] of [
+            ['/api?__bitgroove_path=health', 200, 'BitGroove'],
+            ['/api?__bitgroove_path=yt%2Faudio%2Fbad', 400, 'Invalid YouTube video ID'],
+            ['/api?__bitgroove_path=yt%2Fstream%2Fbad', 400, 'Invalid YouTube video ID'],
+            ['/api?__bitgroove_path=search%2Fsongs&query=Artist&limit=0', 400, 'limit must be'],
+            ['/api?__bitgroove_path=stream&url=bad', 400, 'Unsupported media URL'],
+            ['/api?__bitgroove_path=unknown%2Fnested%2Froute', 404, 'API endpoint not found'],
+            ['/api/health', 200, 'BitGroove']
+        ]) {
+            const response = await fetch(base + path);
+            assert.equal(response.status, status, path);
+            assert.match(response.headers.get('content-type'), /application\/json/);
+            assert.ok((await response.text()).includes(message), path);
+        }
+    } catch (error) { console.error(error); process.exitCode = 1; }
+    finally { server.close(); server.closeAllConnections(); }
+});
+'''
+        result = subprocess.run([shutil.which("node"), "-e", script], cwd=pathlib.Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     @classmethod
     def setUpClass(cls):
         cls.httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), server.BitGrooveHandler)

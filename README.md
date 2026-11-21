@@ -16,11 +16,13 @@ Open **http://localhost:3000**. Python uses the standard library and needs no pa
 
 BitGroove can be deployed to Vercel's free Hobby plan using the existing Node.js Express backend. Import this GitHub repository at [vercel.com/new](https://vercel.com/new), keep the root directory as `./`, and deploy. No card is required for the Hobby plan. Vercel's functions have usage and duration limits; when limits are reached, requests may pause until they reset. Audio is streamed through a function, so this is best for personal use rather than high traffic.
 
+The deployment serves `public` as static files and uses `api/index.js` as one Node function. An explicit rewrite covers every `/api/*` path, including nested search, collection, recommendations, and YouTube routes. The function restores the requested API path before Express handles it, preserving query parameters. Keep `vercel.json` in the repository root; it overrides framework detection for this setup. After deployment, `/api/health` must return JSON, and `/api/yt/audio/bad` must return JSON with HTTP 400. A Vercel `NOT_FOUND` page for the latter means the nested API requests are not reaching the application. Use the project's Production domain for a public playback check; preview URLs may require Vercel authentication.
+
 For the Node.js server:
 
 ```powershell
 npm install
-npm start
+node server.js
 ```
 
 ## Open on a phone or tablet
