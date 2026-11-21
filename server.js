@@ -547,7 +547,7 @@ app.get('/api/deezer/charts', async (req, res) => {
     res.json({ success: true, data: { results: playableRecords(data, formatDeezerTrack) } });
 });
 
-// ============ YOUTUBE SEARCH via Piped (open-source YT frontend) ============
+// ============ YOUTUBE SEARCH via YouTube InnerTube ============
 const PIPED_INSTANCES = [
     'https://pipedapi.kavin.rocks',
     'https://pipedapi.leptons.xyz',
@@ -557,48 +557,69 @@ const PIPED_INSTANCES = [
 app.get('/api/yt/search', async (req, res) => {
     const q = req.query.q || '';
     if (!q.trim()) return res.json({ success: true, data: { results: [] } });
+    const limit = Math.max(1, Math.min(50, Number.parseInt(req.query.limit, 10) || 25));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+        const response = await fetch('https://www.youtube.com/youtubei/v1/search?prettyPrint=false', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Origin': 'https://www.youtube.com',
+                'Referer': 'https://www.youtube.com/'
+            },
+            body: JSON.stringify({
+                context: { client: { clientName: 'WEB', clientVersion: '2.20240101.01.00' } },
+                query: String(q).trim()
+            }),
+            signal: controller.signal
+        });
+        if (!response.ok) return res.status(502).json({ success: false, error: 'YouTube search is temporarily unavailable' });
 
-    for (const base of PIPED_INSTANCES) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 5000);
-            const r = await fetch(
-                `${base}/search?q=${encodeURIComponent(q)}&filter=music_songs`,
-                { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: controller.signal }
-            );
-            clearTimeout(timer);
+        const payload = await response.json();
+        const sections = payload.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+        const results = [];
+        for (const section of sections) {
+            for (const item of section.itemSectionRenderer?.contents || []) {
+                const video = item.videoRenderer;
+                const ytId = video?.videoId;
+                const title = video?.title?.runs?.map(run => run.text || '').join('') || video?.title?.simpleText || '';
+                if (!ytId || !title || !/^[A-Za-z0-9_-]{11}$/.test(ytId)) continue;
 
-            if (!r.ok) continue;
-            const json = await r.json();
-            const items = json.items || [];
-            if (items.length === 0) continue;
-
-            const results = items
-                .filter(item => item.url && item.duration > 0)
-                .map(item => {
-                    const ytId = (item.url || '').replace('/watch?v=', '');
-                    return {
-                        id: `yt-${ytId}`,
-                        ytId,
-                        name: item.title || 'Unknown',
-                        primaryArtists: item.uploaderName || 'YouTube Artist',
-                        album: { name: 'YouTube Music' },
-                        year: '',
-                        duration: item.duration || 0,
-                        image: [{ quality: '500x500', link: item.thumbnail || '' }],
-                        downloadUrl: [],
-                        hasLyrics: false,
-                        source: 'youtube',
-                        needsStream: true
-                    };
+                const durationText = video.lengthText?.simpleText || '';
+                const durationParts = durationText.split(':').map(Number);
+                const duration = durationParts.length > 0 && durationParts.every(Number.isFinite)
+                    ? durationParts.reduce((total, part) => total * 60 + part, 0)
+                    : 0;
+                const owner = video.ownerText?.runs?.map(run => run.text || '').join('') || 'YouTube';
+                const thumbnails = video.thumbnail?.thumbnails || [];
+                results.push({
+                    id: `yt-${ytId}`,
+                    ytId,
+                    name: title,
+                    primaryArtists: owner,
+                    album: { name: 'YouTube Music' },
+                    year: '',
+                    duration,
+                    durationText,
+                    image: [{ quality: '500x500', link: thumbnails.at(-1)?.url || `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg` }],
+                    downloadUrl: [],
+                    hasLyrics: false,
+                    source: 'youtube',
+                    isPreview: false
                 });
-
-            return res.json({ success: true, data: { results } });
-        } catch (e) {
-            console.warn(`Piped instance ${base} failed: ${e.message}`);
+                if (results.length >= limit) break;
+            }
+            if (results.length >= limit) break;
         }
+        return res.json({ success: true, data: { results } });
+    } catch (error) {
+        console.warn(`YouTube InnerTube search failed: ${error.message}`);
+        return res.status(502).json({ success: false, error: 'YouTube search is temporarily unavailable' });
+    } finally {
+        clearTimeout(timer);
     }
-    res.json({ success: true, data: { results: [] } });
 });
 
 // ============ YOUTUBE STREAM RESOLUTION via Piped ============
@@ -660,9 +681,13 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-    console.log(`\n  🎵 BitGroove Music Player`);
-    console.log(`  ========================`);
-    console.log(`  Server running at: http://localhost:${PORT}`);
-    console.log(`  Sources: JioSaavn (DES) | Deezer | YouTube (Piped) | iTunes | Audius\n`);
-});
+if (typeof module !== 'undefined' && require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`\n  🎵 BitGroove Music Player`);
+        console.log(`  ========================`);
+        console.log(`  Server running at: http://localhost:${PORT}`);
+        console.log(`  Sources: JioSaavn (DES) | Deezer | YouTube (Piped) | iTunes | Audius\n`);
+    });
+}
+
+if (typeof module !== 'undefined') module.exports = app;

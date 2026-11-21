@@ -12,6 +12,10 @@ python server.py
 
 Open **http://localhost:3000**. Python uses the standard library and needs no package installation. Stop the server with Ctrl+C.
 
+## Deploy online for free
+
+BitGroove can be deployed to Vercel's free Hobby plan using the existing Node.js Express backend. Import this GitHub repository at [vercel.com/new](https://vercel.com/new), keep the root directory as `./`, and deploy. No card is required for the Hobby plan. Vercel's functions have usage and duration limits; when limits are reached, requests may pause until they reset. Audio is streamed through a function, so this is best for personal use rather than high traffic.
+
 For the Node.js server:
 
 ```powershell
