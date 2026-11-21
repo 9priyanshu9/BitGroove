@@ -1850,7 +1850,7 @@ button:active { filter: brightness(0.9); }
 .np-artwork-container { border-radius: 10px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
 .np-like-btn.liked i, .fs-action-btn.liked i { animation: heartPop 0.25s ease; }
 .np-btn:hover, .fs-btn:hover, .queue-action-btn:hover { background: var(--bg-card-hover); }
-.np-play-btn:hover { background: var(--text-primary); }
+.np-play-btn:hover { background: var(--primary); color: #fff; }
 .song-row:focus-within .song-row-actions, .queue-item:focus-within .queue-item-remove { opacity: 1; }
 .search-results-grid > .song-card, .search-results-grid > .album-card, .search-results-grid > .playlist-card,
 .charts-grid > .playlist-card, .playlists-grid > .playlist-card { min-width: 0; max-width: none; width: 100%; }
