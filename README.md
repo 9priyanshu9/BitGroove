@@ -42,7 +42,7 @@ Turn Autoplay off to stop at the end of your manual queue. Repeat One and Repeat
 ## Music sources
 
 - JioSaavn: full streams when the provider supplies them, with selectable quality.
-- YouTube: playback through the YouTube player when embedding is available.
+- YouTube: listening defaults to audio with no visible video. Direct audio streams use AAC when available. If YouTube rejects or stalls a direct stream, a hidden YouTube player continues at the same position, controlled by BitGroove's play/pause, seeking, volume, queue, and sleep timer. The **Video** button beside Play shows or hides the picture without restarting playback. The hidden-player fallback still receives video data; it does not extract or transcode audio. If the browser blocks autoplay, press BitGroove's Play button.
 - iTunes and Deezer: playable catalog previews, labeled as previews with their playback duration.
 - Audius: community music streams.
 

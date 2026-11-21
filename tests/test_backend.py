@@ -127,13 +127,96 @@ class SearchTests(unittest.TestCase):
 class MediaSafetyTests(unittest.TestCase):
     def test_only_provider_https_hosts_are_accepted(self):
         for url in ("https://aac.saavncdn.com/audio.mp4", ITUNES["previewUrl"],
-                    "https://discoveryprovider.audius.co/v1/tracks/a/stream"):
+                    "https://discoveryprovider.audius.co/v1/tracks/a/stream",
+                    "https://rr.googlevideo.com/videoplayback?id=1"):
             self.assertTrue(server.is_allowed_media_url(url), url)
         for url in ("http://aac.saavncdn.com/audio.mp4", "https://127.0.0.1/a", "https://localhost/a",
                     "https://aac.saavncdn.com.evil.test/a", "https://evilsaavncdn.com/a",
+                    "https://googlevideo.com.evil.test/a",
                     "https://user:pass@aac.saavncdn.com/a", "https://aac.saavncdn.com:3000/a",
                     "https://aac.saavncdn.com/a#fragment", "https://aac.saavncdn.com/\na", None):
             self.assertFalse(server.is_allowed_media_url(url), url)
+
+    def test_youtube_audio_streams_only_accept_googlevideo_https_urls(self):
+        self.assertTrue(server.is_allowed_youtube_audio_url("https://rr.googlevideo.com/videoplayback?id=1"))
+        for url in ("http://rr.googlevideo.com/audio", "https://googlevideo.com.evil.test/audio",
+                    "https://localhost/audio", "https://rr.googlevideo.com:444/audio"):
+            self.assertFalse(server.is_allowed_youtube_audio_url(url), url)
+
+    def test_youtube_audio_resolution_chooses_highest_safe_audio_bitrate(self):
+        payload = {
+            "playabilityStatus": {"status": "OK"},
+            "streamingData": {"adaptiveFormats": [
+                {"url": "https://rr.googlevideo.com/low", "mimeType": "audio/webm", "averageBitrate": 128000},
+                {"url": "https://evil.example/audio", "mimeType": "audio/webm", "averageBitrate": 999000},
+                {"url": "https://rr.googlevideo.com/video", "mimeType": "video/mp4", "averageBitrate": 999000},
+                {"url": "https://rr.googlevideo.com/high", "mimeType": "audio/webm", "averageBitrate": 256000}
+            ]}
+        }
+        with patch.object(server, "fetch_json_post", return_value=payload) as player:
+            stream = server.resolve_youtube_audio_stream("abcdefghijk")
+        self.assertEqual(stream, {
+            "url": "https://rr.googlevideo.com/high",
+            "bitrate": 256000,
+            "mimeType": "audio/webm"
+        })
+        self.assertEqual(player.call_args.args[1]["context"]["client"]["clientName"], "ANDROID")
+
+    def test_piped_is_used_when_youtube_player_clients_have_no_stream(self):
+        payload = {"audioStreams": [
+            {"url": "https://rr.googlevideo.com/audio", "bitrate": 128000, "mimeType": "audio/webm"}
+        ]}
+        with patch.object(server, "fetch_json_post", return_value=None), \
+                patch.object(server, "fetch_json", return_value=payload) as piped:
+            stream = server.resolve_youtube_audio_stream("abcdefghijk")
+        self.assertEqual(stream["url"], "https://rr.googlevideo.com/audio")
+        self.assertEqual(piped.call_count, 1)
+
+    def test_youtube_prefers_browser_compatible_aac_over_higher_bitrate_formats(self):
+        payload = {
+            "playabilityStatus": {"status": "OK"},
+            "streamingData": {"adaptiveFormats": [
+                {"url": "https://rr.googlevideo.com/opus", "mimeType": 'audio/webm; codecs="opus"', "bitrate": 256000},
+                {"url": "https://rr.googlevideo.com/dolby", "mimeType": 'audio/mp4; codecs="ec-3"', "bitrate": 384000},
+                {"url": "https://rr.googlevideo.com/aac", "mimeType": 'audio/mp4; codecs="mp4a.40.2"', "bitrate": 128000}
+            ]}
+        }
+        with patch.object(server, "fetch_json_post", return_value=payload):
+            self.assertEqual(server.resolve_youtube_audio_stream("VYOjWnS4cMY")["url"], "https://rr.googlevideo.com/aac")
+
+    def test_youtube_ranges_are_bounded_for_loading_and_seeking(self):
+        url = "https://rr.googlevideo.com/videoplayback?clen=4000000"
+        cases = {
+            None: "bytes=0-262143",
+            "bytes=0-": "bytes=0-262143",
+            "bytes=300000-": "bytes=300000-562143",
+            "bytes=300000-350000": "bytes=300000-350000",
+            "bytes=0-3999999": "bytes=0-262143",
+            "bytes=3999000-": "bytes=3999000-3999999",
+            "bytes=-1000": "bytes=3999000-3999999"
+        }
+        for original, expected in cases.items():
+            self.assertEqual(server.youtube_media_range(url, original), expected)
+        self.assertEqual(server.youtube_media_range(ITUNES["previewUrl"], None), None)
+        self.assertEqual(server.youtube_media_range(ITUNES["previewUrl"], "bytes=0-"), "bytes=0-")
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
+    def test_node_youtube_codec_and_range_handling_matches_python(self):
+        script = r'''
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync('server.js', 'utf8');
+const helpers = source.slice(source.indexOf('function isAllowedYouTubeAudioUrl('), source.indexOf('async function resolveInnerTubeAudioStream('));
+const context = { URL }; vm.createContext(context); vm.runInContext(helpers, context);
+const url = 'https://rr.googlevideo.com/videoplayback?clen=4000000';
+for (const [input, output] of [[undefined, 'bytes=0-262143'], ['bytes=0-', 'bytes=0-262143'], ['bytes=300000-', 'bytes=300000-562143'], ['bytes=300000-350000', 'bytes=300000-350000'], ['bytes=3999000-', 'bytes=3999000-3999999'], ['bytes=-1000', 'bytes=3999000-3999999']]) {
+    assert.equal(context.youtubeMediaRange(url, input), output);
+}
+assert.equal(context.youtubeMediaRange('https://aac.saavncdn.com/audio.mp4', 'bytes=0-'), 'bytes=0-');
+const formats = [{ mimeType: 'audio/webm; codecs="opus"', bitrate: 256000 }, { mimeType: 'audio/mp4; codecs="ec-3"', bitrate: 384000 }, { mimeType: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 128000 }];
+assert.equal(formats.sort(context.compareYouTubeAudio)[0].bitrate, 128000);
+'''
+        result = subprocess.run([shutil.which("node"), "-e", script], cwd=pathlib.Path(__file__).resolve().parents[1], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_redirect_to_unapproved_host_is_rejected(self):
         request = urllib.request.Request("https://aac.saavncdn.com/a")
@@ -384,6 +467,55 @@ class HTTPTests(unittest.TestCase):
             urllib.request.urlopen(self.base + "/api/yt/stream/bad")
         self.assertEqual(error.exception.code, 400)
         error.exception.close()
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(self.base + "/api/yt/audio/bad")
+        self.assertEqual(error.exception.code, 400)
+        error.exception.close()
+
+    def test_youtube_audio_endpoint_redirects_to_resolved_audio(self):
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, request, response, code, message, headers, new_url):
+                return None
+
+        opener = urllib.request.build_opener(NoRedirect)
+        stream_url = "https://rr.googlevideo.com/videoplayback?id=1"
+        with patch.object(server, "resolve_youtube_audio_stream", return_value={"url": stream_url}) as resolve:
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                opener.open(self.base + "/api/yt/audio/abcdefghijk")
+            self.assertEqual(error.exception.code, 302)
+            self.assertEqual(
+                error.exception.headers["Location"],
+                "/api/stream?url=" + urllib.parse.quote(stream_url, safe="")
+            )
+            self.assertEqual(error.exception.headers["Cache-Control"], "no-store")
+            error.exception.close()
+        resolve.assert_called_once_with("abcdefghijk")
+
+    def test_youtube_audio_uses_same_origin_range_proxy(self):
+        stream_url = "https://rr.googlevideo.com/videoplayback?id=1"
+        request = urllib.request.Request(
+            self.base + "/api/yt/audio/abcdefghijk",
+            headers={"Range": "bytes=0-3"}
+        )
+        with patch.object(server, "resolve_youtube_audio_stream", return_value={"url": stream_url}), \
+                patch.object(server.MEDIA_OPENER, "open", return_value=MediaResponse(b"test")) as upstream:
+            with urllib.request.urlopen(request) as response:
+                self.assertEqual(response.status, 206)
+                self.assertEqual(response.headers["Content-Range"], "bytes 0-3/100")
+                self.assertEqual(response.read(), b"test")
+            forwarded = upstream.call_args.args[0]
+            self.assertEqual(forwarded.full_url, stream_url)
+            self.assertEqual(forwarded.get_header("Range"), "bytes=0-3")
+
+    def test_youtube_browser_requests_forward_bounded_ranges(self):
+        stream_url = "https://rr.googlevideo.com/videoplayback?clen=4000000"
+        for original, expected in ((None, "bytes=0-262143"), ("bytes=0-", "bytes=0-262143"), ("bytes=300000-", "bytes=300000-562143")):
+            request = urllib.request.Request(self.base + "/api/yt/audio/VYOjWnS4cMY", headers={"Range": original} if original else {})
+            with patch.object(server, "resolve_youtube_audio_stream", return_value={"url": stream_url}), \
+                    patch.object(server.MEDIA_OPENER, "open", return_value=MediaResponse(b"test")) as upstream:
+                with urllib.request.urlopen(request) as response:
+                    self.assertEqual(response.read(), b"test")
+                self.assertEqual(upstream.call_args.args[0].get_header("Range"), expected)
 
 
 if __name__ == "__main__":

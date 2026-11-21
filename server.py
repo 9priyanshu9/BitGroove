@@ -159,13 +159,24 @@ def fetch_json(url, timeout=PROVIDER_TIMEOUT, extra_headers=None):
     except Exception:
         return None
 
+def fetch_json_post(url, payload, timeout=PROVIDER_TIMEOUT, extra_headers=None):
+    hdrs = {**HEADERS, "Content-Type": "application/json", **(extra_headers or {})}
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=hdrs)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            if r.status != 200:
+                return None
+            return json.loads(r.read(4 * 1024 * 1024).decode("utf-8"))
+    except Exception:
+        return None
 
-MEDIA_SUFFIXES = ("saavncdn.com", "mzstatic.com", "dzcdn.net", "audius.co")
+
+MEDIA_SUFFIXES = ("saavncdn.com", "mzstatic.com", "dzcdn.net", "audius.co", "googlevideo.com")
 MEDIA_HOSTS = {"audio-ssl.itunes.apple.com", "jiotunepreview.jio.com"}
 
 
 def is_allowed_media_url(url):
-    """Keep the streaming proxy limited to the music providers' HTTPS CDNs."""
+    """Keep the streaming proxy limited to approved HTTPS media CDNs."""
     try:
         if not isinstance(url, str) or any(ord(c) < 32 for c in url):
             return False
@@ -187,6 +198,32 @@ class SafeMediaRedirect(urllib.request.HTTPRedirectHandler):
 
 
 MEDIA_OPENER = urllib.request.build_opener(SafeMediaRedirect())
+
+YOUTUBE_AUDIO_CHUNK_SIZE = 256 * 1024
+
+
+def youtube_media_range(url, range_header):
+    """YouTube rejects unbounded downloads; expose bounded, seekable responses."""
+    if not is_allowed_youtube_audio_url(url):
+        return range_header
+    parsed = urllib.parse.urlsplit(url)
+    length = positive_int(urllib.parse.parse_qs(parsed.query).get("clen", [0])[0])
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header or "bytes=0-")
+    if not match:
+        return range_header
+    first, last = match.groups()
+    if not first:
+        if not length:
+            return range_header
+        start = max(0, length - int(last))
+        end = length - 1
+    else:
+        start = int(first)
+        end = int(last) if last else start + YOUTUBE_AUDIO_CHUNK_SIZE - 1
+    end = min(end, start + YOUTUBE_AUDIO_CHUNK_SIZE - 1)
+    if length and start < length:
+        end = min(end, length - 1)
+    return f"bytes={start}-{end}"
 
 
 def positive_int(value, default=0):
@@ -370,6 +407,107 @@ def youtube_innertube_search(query, limit=25):
     except Exception as e:
         print("YouTube search error:", e)
         return []
+
+PIPED_INSTANCES = (
+    "https://pipedapi.kavin.rocks",
+    "https://pipedapi.leptons.xyz",
+    "https://api.piped.yt",
+)
+
+YOUTUBE_PLAYER_CLIENTS = (
+    {
+        "clientName": "ANDROID",
+        "clientVersion": "20.10.38",
+        "androidSdkVersion": 35,
+        "userAgent": "com.google.android.youtube/20.10.38 (Linux; U; Android 15; en_US; sdk_gphone64_x86_64 Build/AP3A.241005.015.A2) gzip",
+    },
+    {
+        "clientName": "IOS",
+        "clientVersion": "20.10.4",
+        "deviceMake": "Apple",
+        "deviceModel": "iPhone16,2",
+        "osName": "iPhone",
+        "osVersion": "18.0.0.22A3354",
+    },
+)
+
+def is_allowed_youtube_audio_url(url):
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = (parsed.hostname or "").lower()
+        return (
+            parsed.scheme == "https"
+            and (host == "googlevideo.com" or host.endswith(".googlevideo.com"))
+            and not parsed.username
+            and not parsed.password
+            and parsed.port in (None, 443)
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def youtube_audio_rank(stream):
+    # AAC works across desktop and mobile browsers; bitrate alone can pick WebM.
+    mime_type = stream.get("mimeType", "")
+    aac = mime_type.startswith("audio/mp4") and ("codecs=" not in mime_type or "mp4a" in mime_type)
+    return (aac, positive_int(stream.get("averageBitrate") or stream.get("bitrate")))
+
+def resolve_youtube_audio_stream(video_id):
+    for client in YOUTUBE_PLAYER_CLIENTS:
+        payload = fetch_json_post(
+            "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+            {
+                "context": {"client": {**client, "hl": "en", "gl": "US"}},
+                "videoId": video_id,
+                "contentCheckOk": True,
+                "racyCheckOk": True,
+            },
+            timeout=8,
+            extra_headers={
+                "Origin": "https://www.youtube.com",
+                "Referer": "https://www.youtube.com/",
+            },
+        )
+        if not isinstance(payload, dict) or payload.get("playabilityStatus", {}).get("status") != "OK":
+            continue
+        streams = []
+        for stream in (payload.get("streamingData") or {}).get("adaptiveFormats", []):
+            if not isinstance(stream, dict) or not stream.get("mimeType", "").startswith("audio/") or not is_allowed_youtube_audio_url(stream.get("url")):
+                continue
+            try:
+                bitrate = max(0, int(stream.get("averageBitrate") or stream.get("bitrate") or 0))
+            except (TypeError, ValueError):
+                bitrate = 0
+            streams.append((bitrate, stream))
+        if streams:
+            bitrate, stream = max(streams, key=lambda item: youtube_audio_rank(item[1]))
+            return {
+                "url": stream["url"],
+                "bitrate": bitrate,
+                "mimeType": stream["mimeType"],
+            }
+
+    for base in PIPED_INSTANCES:
+        payload = fetch_json(f"{base}/streams/{video_id}", timeout=8)
+        if not isinstance(payload, dict):
+            continue
+        streams = []
+        for stream in payload.get("audioStreams", []):
+            if not isinstance(stream, dict) or stream.get("videoOnly") or not is_allowed_youtube_audio_url(stream.get("url")):
+                continue
+            try:
+                bitrate = max(0, int(stream.get("bitrate") or 0))
+            except (TypeError, ValueError):
+                bitrate = 0
+            streams.append((bitrate, stream))
+        if streams:
+            bitrate, stream = max(streams, key=lambda item: youtube_audio_rank(item[1]))
+            return {
+                "url": stream["url"],
+                "bitrate": bitrate,
+                "mimeType": stream.get("mimeType") or "audio/webm",
+            }
+    return None
 
 # ─── Deezer ───────────────────────────────────────────────────────────────────
 
@@ -773,6 +911,9 @@ class BitGrooveHandler(http.server.SimpleHTTPRequestHandler):
         if range_header:
             if not re.fullmatch(r"bytes=\d*-\d*", range_header) or range_header == "bytes=-":
                 return self.send_json({"success": False, "error": "Invalid range"}, 400)
+        if not head:
+            range_header = youtube_media_range(url, range_header)
+        if range_header:
             headers["Range"] = range_header
         request = urllib.request.Request(url, headers=headers, method="HEAD" if head else "GET")
         try:
@@ -886,18 +1027,28 @@ class BitGrooveHandler(http.server.SimpleHTTPRequestHandler):
             results = youtube_innertube_search(query, limit=limit)
             return self.send_json({"success": True, "data": {"results": results}})
 
-        # ── YouTube Stream / Embed Info ───────────────────────────────────────
+        # ── YouTube audio stream ──────────────────────────────────────────────
+        if path.startswith("/api/yt/audio/"):
+            video_id = path.split("/api/yt/audio/")[-1]
+            if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+                return self.send_json({"success": False, "error": "Invalid YouTube video ID"}, 400)
+            stream = resolve_youtube_audio_stream(video_id)
+            if not stream:
+                return self.send_json({"success": False, "error": "Could not resolve YouTube audio"}, 502)
+            self.send_response(302)
+            self.send_header("Location", "/api/stream?" + urllib.parse.urlencode({"url": stream["url"]}))
+            self.send_header("Cache-Control", "no-store")
+            return self.end_headers()
+
+        # ── YouTube stream metadata ───────────────────────────────────────────
         if path.startswith("/api/yt/stream/"):
             video_id = path.split("/api/yt/stream/")[-1]
             if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
                 return self.send_json({"success": False, "error": "Invalid YouTube video ID"}, 400)
-            return self.send_json({
-                "success": True,
-                "data": {
-                    "videoId": video_id,
-                    "embedUrl": f"https://www.youtube.com/embed/{video_id}"
-                }
-            })
+            stream = resolve_youtube_audio_stream(video_id)
+            if not stream:
+                return self.send_json({"success": False, "error": "Could not resolve YouTube audio"}, 502)
+            return self.send_json({"success": True, "data": stream})
 
         # ── Albums Search ─────────────────────────────────────────────────────
         if path == "/api/search/albums":

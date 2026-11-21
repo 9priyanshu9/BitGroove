@@ -89,6 +89,39 @@ img { display: block; max-width: 100%; }
     position: relative;
 }
 
+.app.youtube-video-open {
+    grid-template-rows: minmax(0, 1fr) 240px var(--now-playing-height);
+}
+
+.app.youtube-video-open .now-playing-bar {
+    grid-row: 3;
+}
+
+#yt-player-host {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #000;
+}
+
+.app.youtube-video-open #yt-player-host {
+    display: flex;
+}
+
+#yt-video-btn[hidden] {
+    display: none;
+}
+
+#yt-player-target,
+#yt-player-target iframe {
+    width: min(320px, calc(100vw - 24px));
+    height: 240px;
+    max-width: 100%;
+}
+
 /* ============ DYNAMIC BACKGROUND ============ */
 .dynamic-bg {
     position: fixed;

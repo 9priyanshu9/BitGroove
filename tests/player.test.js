@@ -34,7 +34,7 @@ async function settle() {
     for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-function harness(fetchImpl = async () => response([])) {
+function harness(fetchImpl = async () => response([]), youtubeIframeApiLoaded = false) {
     let now = 0;
     let timerId = 0;
     const timers = new Map();
@@ -42,6 +42,24 @@ function harness(fetchImpl = async () => response([])) {
     const documentEvents = new Map();
     const warnings = [];
     const fetches = [];
+    const ytPlayers = [];
+    const ytCalls = [];
+    const ytApi = { PlayerState: { PLAYING: 1, PAUSED: 2, ENDED: 0, BUFFERING: 3, CUED: 5 } };
+    if (youtubeIframeApiLoaded) {
+        ytApi.Player = function(target, config) {
+            ytPlayers.push({ target, config });
+            return {
+                loadVideoById(video) { ytCalls.push({ method: 'load', video }); },
+                cueVideoById(video) { ytCalls.push({ method: 'cue', video }); },
+                playVideo() { ytCalls.push({ method: 'play' }); },
+                pauseVideo() { ytCalls.push({ method: 'pause' }); },
+                setVolume(volume) { ytCalls.push({ method: 'volume', volume }); },
+                seekTo(seconds) { ytCalls.push({ method: 'seek', seconds }); },
+                getCurrentTime() { return 23; },
+                getDuration() { return 30; }
+            };
+        };
+    }
 
     class Element {
         constructor() {
@@ -161,7 +179,7 @@ function harness(fetchImpl = async () => response([])) {
         location: { href: 'http://localhost:3000/', origin: 'http://localhost:3000', protocol: 'http:' },
         localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
         AbortController, URL, URLSearchParams, Promise, Date, Math,
-        YT: { PlayerState: { PLAYING: 1, PAUSED: 2, ENDED: 0, BUFFERING: 3, CUED: 5 } },
+        YT: ytApi,
         setTimeout(callback, delay = 0) {
             const id = ++timerId;
             timers.set(id, { callback, at: now + Number(delay), interval: 0 });
@@ -190,7 +208,8 @@ function harness(fetchImpl = async () => response([])) {
             setQueue, addNextToQueue, removeFromQueue, clearQueue, performSearch,
             addToQueue, setAutoplay, loadRelatedSongs, appendRecommendations, renderQueue,
             loadHomePage, renderChartsPage, renderAlbumDetailPage, renderPlaylistDetailPage, navigateTo, setupEventListeners, retryDiscovery,
-            onYTStateChange, onYTError, setupAudioListeners,
+            onYTStateChange, onYTError, setupAudioListeners, toggleYouTubeVideo,
+            seekTo, setVolume, toggleMute, setSleepTimer,
             setYtPlayer(player) { ytPlayer = player; ytReady = true; }
         };
     `;
@@ -198,7 +217,7 @@ function harness(fetchImpl = async () => response([])) {
     vm.runInNewContext(source.replace(/\}\)\(\);\s*$/, `${bridge}\n})();`), context, { filename: 'public/app.js' });
     const player = context.__player;
     return {
-        player, context, elements, warnings, fetches,
+        player, context, elements, warnings, fetches, ytPlayers, ytCalls,
         emitDocument(name, event) {
             for (const callback of documentEvents.get(name) || []) callback(event);
         },
@@ -243,6 +262,283 @@ test('Play loads the selected track when its audio source is not loaded', async 
     assert.ok(h.player.audio.src.includes('selected'), 'selected stream must be assigned');
     assert.equal(h.player.audio.playCalls, 1);
     assert.equal(h.player.state.isPlaying, true);
+});
+
+test('YouTube tracks use the main audio element without loading a video iframe', async () => {
+    const h = harness(undefined, true);
+    const youtube = song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk', downloadUrl: [] });
+    await h.player.playSong(youtube);
+
+    assert.equal(h.player.audio.src, '/api/yt/audio/abcdefghijk');
+    assert.equal(h.player.audio.playCalls, 1);
+    assert.equal(h.player.state.isYtPlaying, false);
+    assert.equal(h.ytPlayers.length, 0);
+    assert.equal(h.elements.get('app').classList.contains('youtube-track-active'), true);
+    assert.equal(h.elements.get('yt-video-btn').hidden, false);
+});
+
+test('the Video button shows and hides the picture without restarting playback', async () => {
+    const h = harness(undefined, true);
+    const youtube = song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk', downloadUrl: [] });
+    await h.player.playSong(youtube);
+    h.player.audio.currentTime = 12;
+
+    h.player.toggleYouTubeVideo();
+    assert.equal(h.player.state.isYtPlaying, true);
+    assert.equal(h.player.state.isYtVideoVisible, true);
+    assert.equal(h.elements.get('app').classList.contains('youtube-video-open'), true);
+    assert.equal(h.ytPlayers.length, 1);
+    h.ytPlayers[0].config.events.onReady();
+    assert.equal(h.ytCalls[0].method, 'load');
+    assert.equal(h.ytCalls[0].video.videoId, 'abcdefghijk');
+    assert.equal(h.ytCalls[0].video.startSeconds, 12);
+    assert.equal(h.ytCalls[1].method, 'play');
+
+    const callsBeforeHide = h.ytCalls.length;
+    h.player.toggleYouTubeVideo();
+    await settle();
+    assert.equal(h.player.state.isYtPlaying, true);
+    assert.equal(h.player.state.isYtVideoVisible, false);
+    assert.equal(h.elements.get('app').classList.contains('youtube-video-open'), false);
+    assert.equal(h.ytCalls.length, callsBeforeHide, 'hiding the picture must not reload, seek, or pause');
+    assert.equal(h.player.audio.playCalls, 1);
+    assert.equal(h.player.state.isPlaying, true);
+
+    await h.player.playSong(song('regular-track'));
+    assert.equal(h.elements.get('app').classList.contains('youtube-track-active'), false);
+    assert.equal(h.elements.get('yt-video-btn').hidden, true);
+});
+
+test('a rejected YouTube audio load falls back once without skipping the selected track', async () => {
+    const h = harness(undefined, true);
+    h.player.setupAudioListeners();
+    const failed = deferred();
+    h.player.audio.nextPlay = failed.promise;
+    const youtube = song('yt-VYOjWnS4cMY', { source: 'youtube', ytId: 'VYOjWnS4cMY', downloadUrl: [] });
+    h.player.state.queue = [youtube, song('next')];
+    const playing = h.player.playSong(youtube);
+    h.player.audio.error = { code: 4 };
+    h.player.audio.emit('error');
+    failed.reject(Object.assign(new Error('Unsupported stream'), { name: 'NotSupportedError' }));
+    await playing;
+
+    assert.equal(h.player.state.currentSong, youtube);
+    assert.equal(h.player.state.queueIndex, 0);
+    assert.equal(h.player.state.isYtPlaying, true);
+    assert.equal(h.player.state.isYtVideoVisible, false);
+    assert.equal(h.elements.get('app').classList.contains('youtube-video-open'), false);
+    assert.equal(h.elements.get('yt-player-host').getAttribute('aria-hidden'), 'true');
+    assert.equal(h.elements.get('yt-player-host').getAttribute('inert'), '');
+    assert.equal(h.player.audio.getAttribute('src'), null);
+    assert.equal(h.ytPlayers.length, 1);
+    h.ytPlayers[0].config.events.onReady();
+    assert.equal(h.ytCalls.find(call => call.method === 'load').video.videoId, 'VYOjWnS4cMY');
+    assert.equal(h.elements.get('toast-container')?.children.length || 0, 0, 'successful hidden fallback needs no error messages');
+});
+
+test('a YouTube play rejection falls back even without an HTML error event', async () => {
+    const h = harness(undefined, true);
+    h.player.audio.nextPlay = Promise.reject(Object.assign(new Error('Failed'), { name: 'NotSupportedError' }));
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    assert.equal(h.player.state.isYtPlaying, true);
+    assert.equal(h.ytPlayers.length, 1);
+});
+
+test('a mid-track YouTube stall resumes hidden audio at the same position', async () => {
+    const h = harness(undefined, true);
+    h.player.setupAudioListeners();
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    h.player.audio.currentTime = 42;
+    h.player.audio.emit('timeupdate');
+    h.player.audio.emit('waiting');
+    await h.advance(10000);
+    h.ytPlayers[0].config.events.onReady();
+    assert.equal(h.ytCalls.find(call => call.method === 'load').video.startSeconds, 42);
+    assert.equal(h.player.state.isYtPlaying, true);
+    assert.equal(h.player.state.isYtVideoVisible, false);
+    assert.equal(h.elements.get('app').classList.contains('youtube-video-open'), false);
+});
+
+test('a hidden fallback remains on the same engine when Video is toggled', async () => {
+    const h = harness(undefined, true);
+    h.player.audio.nextPlay = Promise.reject(Object.assign(new Error('Failed'), { name: 'NotSupportedError' }));
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    h.ytPlayers[0].config.events.onReady();
+    const callsBeforeToggle = h.ytCalls.length;
+    h.player.toggleYouTubeVideo();
+    assert.equal(h.player.state.isYtVideoVisible, true);
+    assert.equal(h.elements.get('yt-video-btn').getAttribute('aria-pressed'), 'true');
+    assert.equal(h.elements.get('yt-player-host').getAttribute('aria-hidden'), 'false');
+    h.player.toggleYouTubeVideo();
+    assert.equal(h.player.state.isYtVideoVisible, false);
+    assert.equal(h.ytCalls.length, callsBeforeToggle);
+    assert.equal(h.player.audio.playCalls, 1);
+    assert.equal(h.player.state.isPlaying, true);
+});
+
+test('BitGroove controls pause, play, seek and mute hidden YouTube audio', async () => {
+    const h = harness(undefined, true);
+    h.player.audio.nextPlay = Promise.reject(Object.assign(new Error('Failed'), { name: 'NotSupportedError' }));
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    h.ytPlayers[0].config.events.onReady();
+    h.player.togglePlay();
+    assert.equal(h.ytCalls.at(-1).method, 'pause');
+    assert.equal(h.player.state.isPlaying, false);
+    h.player.togglePlay();
+    assert.equal(h.ytCalls.at(-1).method, 'play');
+    assert.equal(h.player.state.isPlaying, true);
+    h.player.seekTo(50);
+    assert.equal(h.ytCalls.at(-1).method, 'seek');
+    assert.equal(h.ytCalls.at(-1).seconds, 15);
+    h.player.setVolume(25);
+    assert.equal(h.ytCalls.at(-1).volume, 25);
+    h.player.toggleMute();
+    assert.equal(h.ytCalls.at(-1).volume, 0);
+    h.player.toggleMute();
+    assert.equal(h.ytCalls.at(-1).volume, 25);
+    assert.equal(h.player.audio.playCalls, 1, 'controls must not restart the failed audio element');
+    assert.equal(h.player.state.isYtVideoVisible, false);
+});
+
+test('seeking hidden audio before the YouTube engine is ready updates its start position', async () => {
+    const h = harness(undefined, true);
+    h.player.audio.nextPlay = Promise.reject(Object.assign(new Error('Failed'), { name: 'NotSupportedError' }));
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk', duration: 100 }));
+    h.player.seekTo(75);
+    h.ytPlayers[0].config.events.onReady();
+    assert.equal(h.ytCalls.find(call => call.method === 'load').video.startSeconds, 75);
+    assert.equal(h.player.state.isYtVideoVisible, false);
+});
+
+test('the sleep timer pauses hidden YouTube audio through the active engine', async () => {
+    const h = harness(undefined, true);
+    h.player.audio.nextPlay = Promise.reject(Object.assign(new Error('Failed'), { name: 'NotSupportedError' }));
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    h.ytPlayers[0].config.events.onReady();
+    h.player.setSleepTimer(1);
+    h.player.state.sleepTimer.remainingSeconds = 1;
+    await h.advance(1000);
+    assert.equal(h.ytCalls.at(-1).method, 'pause');
+    assert.equal(h.player.state.isPlaying, false);
+});
+
+test('hidden YouTube audio ends into the queue with video still disabled', async () => {
+    const h = harness(undefined, true);
+    h.player.state.settings.autoplay = false;
+    const youtube = song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' });
+    h.player.state.queue = [youtube, song('next')];
+    h.player.audio.nextPlay = Promise.reject(Object.assign(new Error('Failed'), { name: 'NotSupportedError' }));
+    await h.player.playSong(youtube);
+    h.ytPlayers[0].config.events.onReady();
+    h.player.onYTStateChange({ data: 0 });
+    await settle();
+    assert.equal(h.player.state.currentSong.id, 'next');
+    assert.equal(h.player.state.queueIndex, 1);
+    assert.equal(h.player.state.isYtVideoVisible, false);
+    assert.equal(h.elements.get('app').classList.contains('youtube-video-open'), false);
+    assert.equal(h.player.state.isPlaying, true);
+});
+
+test('a pending YouTube audio load times out and uses the player', async () => {
+    const h = harness(undefined, true);
+    const pending = deferred();
+    h.player.audio.nextPlay = pending.promise;
+    const playing = h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    await h.advance(10000);
+    assert.equal(h.player.state.isYtPlaying, true);
+    pending.reject(Object.assign(new Error('Cancelled for fallback'), { name: 'AbortError' }));
+    await playing;
+    assert.equal(h.ytPlayers.length, 1);
+});
+
+test('pausing a stalled YouTube track cancels automatic fallback', async () => {
+    const h = harness(undefined, true);
+    h.player.setupAudioListeners();
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    h.player.audio.emit('waiting');
+    h.player.togglePlay();
+    await h.advance(15000);
+    assert.equal(h.player.state.isPlaying, false);
+    assert.equal(h.ytPlayers.length, 0);
+});
+
+test('recovered buffering clears the YouTube fallback timer', async () => {
+    const h = harness(undefined, true);
+    h.player.setupAudioListeners();
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    h.player.audio.emit('waiting');
+    await h.advance(5000);
+    h.player.audio.emit('playing');
+    await h.advance(10000);
+    assert.equal(h.ytPlayers.length, 0);
+    assert.equal(h.player.state.isPlaying, true);
+});
+
+test('late YouTube failures and watchdogs cannot interrupt a newer track', async () => {
+    const h = harness(undefined, true);
+    h.player.setupAudioListeners();
+    const failed = deferred();
+    h.player.audio.nextPlay = failed.promise;
+    const old = h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    await h.player.playSong(song('latest'));
+    failed.reject(Object.assign(new Error('Old stream failed'), { name: 'NotSupportedError' }));
+    await old;
+    h.player.audio.emit('error'); // Queued event after the media error was cleared by a source change.
+    await h.advance(15000);
+    assert.equal(h.player.state.currentSong.id, 'latest');
+    assert.equal(h.player.state.isPlaying, true);
+    assert.equal(h.ytPlayers.length, 0);
+});
+
+test('browser autoplay restrictions prompt for play without starting a fallback', async () => {
+    const h = harness(undefined, true);
+    h.player.audio.nextPlay = Promise.reject(Object.assign(new Error('Gesture required'), { name: 'NotAllowedError' }));
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    await h.advance(15000);
+    assert.equal(h.ytPlayers.length, 0);
+    assert.equal(h.player.state.isPlaying, false);
+});
+
+test('fallback waits for the iframe API and respects pause before the player is ready', async () => {
+    const h = harness(undefined, true);
+    const constructor = h.context.YT.Player;
+    delete h.context.YT.Player;
+    h.context.onYouTubeIframeAPIReady();
+    h.player.audio.nextPlay = Promise.reject(Object.assign(new Error('Failed'), { name: 'NotSupportedError' }));
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    assert.equal(h.ytPlayers.length, 0);
+    h.player.togglePlay();
+    h.context.YT.Player = constructor;
+    h.context.onYouTubeIframeAPIReady();
+    h.ytPlayers[0].config.events.onReady();
+    assert.equal(h.ytCalls.find(call => call.method === 'cue').video.videoId, 'abcdefghijk');
+    assert.equal(h.ytCalls.some(call => call.method === 'play'), false);
+    assert.equal(h.player.state.isPlaying, false);
+});
+
+test('an existing ready YouTube player loads subsequent tracks immediately', async () => {
+    const h = harness(undefined, true);
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    h.player.toggleYouTubeVideo();
+    h.ytPlayers[0].config.events.onReady();
+    h.player.audio.nextPlay = Promise.reject(Object.assign(new Error('Failed'), { name: 'NotSupportedError' }));
+    await h.player.playSong(song('yt-VYOjWnS4cMY', { source: 'youtube', ytId: 'VYOjWnS4cMY' }));
+    assert.equal(h.ytPlayers.length, 1);
+    assert.equal(h.ytCalls.filter(call => call.method === 'load').at(-1).video.videoId, 'VYOjWnS4cMY');
+});
+
+test('unplayable embeds stop cleanly without looping back into failed audio', async () => {
+    const h = harness(undefined, true);
+    h.player.audio.nextPlay = Promise.reject(Object.assign(new Error('Failed'), { name: 'NotSupportedError' }));
+    await h.player.playSong(song('yt-abcdefghijk', { source: 'youtube', ytId: 'abcdefghijk' }));
+    h.ytPlayers[0].config.events.onReady();
+    h.player.onYTError({ data: 150 });
+    await h.advance(15000);
+    assert.equal(h.player.state.isPlaying, false);
+    assert.equal(h.player.audio.playCalls, 1);
+    assert.equal(h.player.state.currentSong.id, 'yt-abcdefghijk');
+    h.player.togglePlay();
+    assert.equal(h.ytCalls.filter(call => call.method === 'load').length, 2, 'retry reloads the same video');
 });
 
 test('manual Next advances under repeat-one while ended repeats the current song', async () => {

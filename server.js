@@ -48,7 +48,7 @@ function isAllowedMediaUrl(value) {
         const host = url.hostname.toLowerCase();
         return url.protocol === 'https:' && !url.username && !url.password && !url.hash && (!url.port || url.port === '443') &&
             (['audio-ssl.itunes.apple.com', 'jiotunepreview.jio.com'].includes(host) ||
-                ['saavncdn.com', 'mzstatic.com', 'dzcdn.net', 'audius.co'].some(suffix => host === suffix || host.endsWith('.' + suffix)));
+                ['saavncdn.com', 'mzstatic.com', 'dzcdn.net', 'audius.co', 'googlevideo.com'].some(suffix => host === suffix || host.endsWith('.' + suffix)));
     } catch { return false; }
 }
 
@@ -368,8 +368,9 @@ app.get('/api/stream', async (req, res) => {
     try {
         let upstream;
         for (let count = 0; count < 5; count++) {
+            const upstreamRange = req.method === 'HEAD' ? range : youtubeMediaRange(url, range);
             upstream = await fetch(url, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', redirect: 'manual', signal: controller.signal,
-                headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Encoding': 'identity', ...(range ? { Range: range } : {}) } });
+                headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Encoding': 'identity', ...(upstreamRange ? { Range: upstreamRange } : {}) } });
             if (![301, 302, 303, 307, 308].includes(upstream.status)) break;
             const target = new URL(upstream.headers.get('location') || '', url).toString();
             if (!isAllowedMediaUrl(target)) throw new Error('Unsupported media redirect');
@@ -554,6 +555,138 @@ const PIPED_INSTANCES = [
     'https://api.piped.yt'
 ];
 
+const YOUTUBE_PLAYER_CLIENTS = [
+    {
+        clientName: 'ANDROID',
+        clientVersion: '20.10.38',
+        androidSdkVersion: 35,
+        userAgent: 'com.google.android.youtube/20.10.38 (Linux; U; Android 15; en_US; sdk_gphone64_x86_64 Build/AP3A.241005.015.A2) gzip'
+    },
+    {
+        clientName: 'IOS',
+        clientVersion: '20.10.4',
+        deviceMake: 'Apple',
+        deviceModel: 'iPhone16,2',
+        osName: 'iPhone',
+        osVersion: '18.0.0.22A3354'
+    }
+];
+
+function isAllowedYouTubeAudioUrl(value) {
+    try {
+        const url = new URL(value);
+        return url.protocol === 'https:' &&
+            (url.hostname === 'googlevideo.com' || url.hostname.endsWith('.googlevideo.com')) &&
+            !url.username && !url.password && (!url.port || url.port === '443');
+    } catch {
+        return false;
+    }
+}
+
+function youtubeMediaRange(value, range) {
+    if (!isAllowedYouTubeAudioUrl(value)) return range;
+    const chunkSize = 256 * 1024;
+    const length = Math.max(0, Number(new URL(value).searchParams.get('clen')) || 0);
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range || 'bytes=0-');
+    if (!match) return range;
+    let start, end;
+    if (!match[1]) {
+        if (!length) return range;
+        start = Math.max(0, length - Number(match[2]));
+        end = length - 1;
+    } else {
+        start = Number(match[1]);
+        end = match[2] ? Number(match[2]) : start + chunkSize - 1;
+    }
+    end = Math.min(end, start + chunkSize - 1);
+    if (length && start < length) end = Math.min(end, length - 1);
+    return `bytes=${start}-${end}`;
+}
+
+function compareYouTubeAudio(a, b) {
+    const aac = stream => Boolean(stream.mimeType?.startsWith('audio/mp4') &&
+        (!stream.mimeType.includes('codecs=') || stream.mimeType.includes('mp4a')));
+    return Number(aac(b)) - Number(aac(a)) ||
+        (b.averageBitrate || b.bitrate || 0) - (a.averageBitrate || a.bitrate || 0);
+}
+
+async function resolveInnerTubeAudioStream(videoId) {
+    for (const client of YOUTUBE_PLAYER_CLIENTS) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        try {
+            const response = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+                    'Origin': 'https://www.youtube.com',
+                    'Referer': 'https://www.youtube.com/'
+                },
+                body: JSON.stringify({
+                    context: { client: { ...client, hl: 'en', gl: 'US' } },
+                    videoId,
+                    contentCheckOk: true,
+                    racyCheckOk: true
+                }),
+                signal: controller.signal
+            });
+            if (!response.ok) continue;
+            const payload = await response.json();
+            if (payload.playabilityStatus?.status !== 'OK') continue;
+            const audioStreams = (payload.streamingData?.adaptiveFormats || [])
+                .filter(stream => stream.mimeType?.startsWith('audio/') && isAllowedYouTubeAudioUrl(stream.url))
+                .sort(compareYouTubeAudio);
+            if (audioStreams.length > 0) {
+                return {
+                    url: audioStreams[0].url,
+                    bitrate: audioStreams[0].averageBitrate || audioStreams[0].bitrate || 0,
+                    mimeType: audioStreams[0].mimeType
+                };
+            }
+        } catch (error) {
+            console.warn(`YouTube player ${client.clientName} failed: ${error.message}`);
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+    return null;
+}
+
+async function resolvePipedAudioStream(videoId) {
+    for (const base of PIPED_INSTANCES) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        try {
+            const response = await fetch(`${base}/streams/${videoId}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0' },
+                signal: controller.signal
+            });
+            if (!response.ok) continue;
+            const json = await response.json();
+            const audioStreams = (json.audioStreams || [])
+                .filter(stream => stream.url && !stream.videoOnly && isAllowedYouTubeAudioUrl(stream.url))
+                .sort(compareYouTubeAudio);
+            if (audioStreams.length > 0) {
+                return {
+                    url: audioStreams[0].url,
+                    bitrate: audioStreams[0].bitrate,
+                    mimeType: audioStreams[0].mimeType || 'audio/webm'
+                };
+            }
+        } catch (error) {
+            console.warn(`Piped stream ${base} failed: ${error.message}`);
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+    return null;
+}
+
+async function resolveYouTubeAudioStream(videoId) {
+    return await resolveInnerTubeAudioStream(videoId) || await resolvePipedAudioStream(videoId);
+}
+
 app.get('/api/yt/search', async (req, res) => {
     const q = req.query.q || '';
     if (!q.trim()) return res.json({ success: true, data: { results: [] } });
@@ -622,42 +755,21 @@ app.get('/api/yt/search', async (req, res) => {
     }
 });
 
-// ============ YOUTUBE STREAM RESOLUTION via Piped ============
+// ============ YOUTUBE AUDIO STREAM ============
+app.get('/api/yt/audio/:videoId', async (req, res) => {
+    const { videoId } = req.params;
+    if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return res.status(400).json({ success: false, error: 'Invalid YouTube video ID' });
+    const stream = await resolveYouTubeAudioStream(videoId);
+    if (!stream) return res.status(502).json({ success: false, error: 'Could not resolve YouTube audio' });
+    res.set('Cache-Control', 'no-store').redirect(302, `/api/stream?url=${encodeURIComponent(stream.url)}`);
+});
+
 app.get('/api/yt/stream/:videoId', async (req, res) => {
     const { videoId } = req.params;
-    if (!videoId) return res.status(400).json({ success: false });
-
-    for (const base of PIPED_INSTANCES) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 8000);
-            const r = await fetch(
-                `${base}/streams/${videoId}`,
-                { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: controller.signal }
-            );
-            clearTimeout(timer);
-
-            if (!r.ok) continue;
-            const json = await r.json();
-            const audioStreams = (json.audioStreams || [])
-                .filter(s => s.url && !s.videoOnly)
-                .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-
-            if (audioStreams.length > 0) {
-                return res.json({
-                    success: true,
-                    data: {
-                        url: audioStreams[0].url,
-                        bitrate: audioStreams[0].bitrate,
-                        mimeType: audioStreams[0].mimeType || 'audio/webm'
-                    }
-                });
-            }
-        } catch (e) {
-            console.warn(`Piped stream ${base} failed: ${e.message}`);
-        }
-    }
-    res.status(404).json({ success: false, error: 'Could not resolve YouTube stream' });
+    if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return res.status(400).json({ success: false, error: 'Invalid YouTube video ID' });
+    const stream = await resolveYouTubeAudioStream(videoId);
+    if (!stream) return res.status(502).json({ success: false, error: 'Could not resolve YouTube audio' });
+    res.json({ success: true, data: stream });
 });
 
 // ============ LYRICS via lyrics.ovh (fallback for non-JioSaavn songs) ============
